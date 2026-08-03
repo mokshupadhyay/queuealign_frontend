@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, api } from '../api/client'
 import { Shell } from '../components/Shell'
@@ -8,6 +8,7 @@ export function Landing() {
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const codeInputRef = useRef<HTMLInputElement>(null)
 
   async function join(e: FormEvent) {
     e.preventDefault()
@@ -19,16 +20,33 @@ export function Landing() {
       await api.getEvent(slug)
       navigate(`/e/${slug}`)
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 404 ? 'No event with that code.' : err instanceof Error ? err.message : 'Could not find event')
+      setError(
+        err instanceof ApiError && err.status === 404
+          ? 'No event with that code.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not find event',
+      )
     } finally {
       setLoading(false)
     }
   }
 
+  function focusJoin(e: MouseEvent) {
+    e.preventDefault()
+    const el = codeInputRef.current
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    window.setTimeout(() => el.focus(), 200)
+  }
+
   return (
     <Shell>
       <section className="hero">
-        <p className="muted" style={{ letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.8rem' }}>
+        <p
+          className="muted"
+          style={{ letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.8rem' }}
+        >
           QueueAlign
         </p>
         <h1>Fair check-in. No cutting the line.</h1>
@@ -40,14 +58,15 @@ export function Landing() {
           <Link className="btn" to="/create">
             Create event
           </Link>
-          <a className="btn btn-ghost" href="#join">
+          <button className="btn btn-ghost" type="button" onClick={focusJoin}>
             Join with code
-          </a>
+          </button>
         </div>
       </section>
 
       <form id="join" className="join-row" onSubmit={join}>
         <input
+          ref={codeInputRef}
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Event code / slug"
@@ -57,7 +76,11 @@ export function Landing() {
           {loading ? 'Checking…' : 'Join'}
         </button>
       </form>
-      {error && <p className="error" style={{ marginTop: '0.75rem' }}>{error}</p>}
+      {error && (
+        <p className="error" style={{ marginTop: '0.75rem' }}>
+          {error}
+        </p>
+      )}
       <p className="muted" style={{ marginTop: '0.75rem' }}>
         Have a registration link? Open it directly — or paste the event slug above.
       </p>

@@ -231,6 +231,7 @@ input {
 input:focus {
   outline: 2px solid var(--accent-soft);
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 107, 92, 0.12);
 }
 
 .muted {
