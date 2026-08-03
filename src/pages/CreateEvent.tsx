@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type EventCreated } from '../api/client'
+import { api, resolveAssetUrl, type EventCreated } from '../api/client'
 import { Shell } from '../components/Shell'
 
 export function CreateEvent() {
@@ -29,14 +29,13 @@ export function CreateEvent() {
     }
   }
 
-  async function copyPath(path: string, label: string) {
-    const url = `${window.location.origin}${path}`
+  async function copyText(text: string, label: string) {
     try {
-      await navigator.clipboard.writeText(url)
+      await navigator.clipboard.writeText(text)
       setCopied(label)
       window.setTimeout(() => setCopied(null), 1500)
     } catch {
-      window.prompt('Copy this link:', url)
+      window.prompt('Copy this:', text)
     }
   }
 
@@ -44,7 +43,7 @@ export function CreateEvent() {
     <Shell>
       <h1 className="page-title">Create an event</h1>
       <p className="page-sub muted">
-        Set a name and a desk PIN. You’ll get shareable links for register, desk, and display.
+        Create once. Share the Event QR so participants can scan to join and get their queue number.
       </p>
 
       {!created ? (
@@ -83,14 +82,34 @@ export function CreateEvent() {
       ) : (
         <div className="panel">
           <h2 style={{ marginBottom: '0.35rem' }}>{created.name}</h2>
-          <p className="muted">
-            Code: <strong style={{ color: 'var(--ink)' }}>{created.slug}</strong> · Store your PIN
-            securely — it unlocks the desk.
+          <p className="muted" style={{ marginBottom: '1.25rem' }}>
+            Code: <strong style={{ color: 'var(--ink)' }}>{created.slug}</strong>
           </p>
+
+          <div className="qr-wrap" style={{ marginBottom: '1.5rem' }}>
+            <p style={{ color: 'var(--ink)', fontWeight: 500 }}>Participants scan this to join</p>
+            <img
+              src={resolveAssetUrl(created.event_qr_url)}
+              alt="Event join QR code"
+              width={240}
+              height={240}
+            />
+            <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
+              Print or project this QR at the venue. It opens registration for this event.
+            </p>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => copyText(created.register_url, 'join')}
+            >
+              {copied === 'join' ? 'Copied join link' : 'Copy join link'}
+            </button>
+          </div>
+
+          <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Organizer tools</h3>
           <div className="link-list">
             {(
               [
-                ['Register', created.register_path],
                 ['Organizer desk', created.desk_path],
                 ['Public display', created.display_path],
               ] as const
@@ -103,7 +122,11 @@ export function CreateEvent() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <button className="btn btn-ghost" type="button" onClick={() => copyPath(path, label)}>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => copyText(`${window.location.origin}${path}`, label)}
+                  >
                     {copied === label ? 'Copied' : 'Copy'}
                   </button>
                   <Link className="btn" to={path}>
@@ -114,7 +137,8 @@ export function CreateEvent() {
             ))}
           </div>
           <p className="muted" style={{ marginTop: '1rem' }}>
-            PIN reminder: <strong style={{ color: 'var(--ink)' }}>{created.pin}</strong>
+            Desk PIN: <strong style={{ color: 'var(--ink)' }}>{created.pin}</strong> — keep this
+            private.
           </p>
         </div>
       )}

@@ -59,6 +59,9 @@ export function Ticket() {
             {data?.event_name ?? '…'}
           </p>
           <h1 className="page-title">Your check-in ticket</h1>
+          <p className="muted" style={{ marginBottom: '1rem' }}>
+            Keep this page open. Your ticket QR proves you’re the person with this queue number.
+          </p>
           {error && data && (
             <p className="error" style={{ marginBottom: '0.75rem' }}>
               Connection issue — showing last update. {error}
@@ -122,7 +125,7 @@ export function Ticket() {
                 />
               )}
               <p className="muted" style={{ textAlign: 'center', fontSize: '0.85rem' }}>
-                Show this at the desk. This page updates live.
+                Show this QR at the desk to verify your number. Status updates live.
               </p>
             </div>
           </div>

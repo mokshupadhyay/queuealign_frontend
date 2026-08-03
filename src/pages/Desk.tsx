@@ -3,23 +3,9 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError, api, deskTokenKey, type QueueOut } from '../api/client'
 import { Shell } from '../components/Shell'
 import { usePolling } from '../hooks/usePolling'
+import { extractCheckinToken } from '../lib/qrParse'
 
 const POLL_MS = 2000
-
-function extractToken(raw: string): string | null {
-  const text = raw.trim()
-  const pathMatch = text.match(/\/e\/[^/]+\/t\/([a-f0-9]+)/i)
-  if (pathMatch) return pathMatch[1]
-  if (/^[a-f0-9]{16,}$/i.test(text)) return text
-  try {
-    const url = new URL(text)
-    const m = url.pathname.match(/\/e\/[^/]+\/t\/([a-f0-9]+)/i)
-    if (m) return m[1]
-  } catch {
-    /* not a URL */
-  }
-  return null
-}
 
 export function Desk() {
   const { slug = '' } = useParams()
@@ -159,9 +145,9 @@ export function Desk() {
       const config = { fps: 8, qrbox: { width: 220, height: 220 } }
 
       const onScan = (decoded: string) => {
-        const t = extractToken(decoded)
-        if (t) void checkinRef.current(t)
-        else setScanHint('QR read, but it wasn’t a QueueAlign ticket.')
+          const t = extractCheckinToken(decoded)
+          if (t) void checkinRef.current(t)
+          else setScanHint('QR read, but it wasn’t a participant ticket.')
       }
 
       try {
@@ -208,7 +194,9 @@ export function Desk() {
     return (
       <Shell>
         <h1 className="page-title">Organizer desk</h1>
-        <p className="page-sub muted">Enter the event PIN to manage the queue.</p>
+        <p className="page-sub muted">
+          Enter the event PIN. Call people in order, then scan their ticket QR to verify check-in.
+        </p>
         <form className="form panel" onSubmit={unlock}>
           <label>
             PIN
@@ -239,7 +227,7 @@ export function Desk() {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
         <div>
           <h1 className="page-title">{queue?.event_name ?? 'Desk'}</h1>
-          <p className="page-sub muted">Live queue · updates every few seconds</p>
+          <p className="page-sub muted">Call next, then scan ticket QR to verify the guest</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <Link className="btn btn-ghost" to={`/e/${slug}/display`} target="_blank">

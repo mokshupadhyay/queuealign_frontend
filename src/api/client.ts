@@ -20,8 +20,19 @@ export interface EventCreated {
   name: string
   pin: string
   register_path: string
+  register_url: string
   desk_path: string
   display_path: string
+  event_qr_url: string
+}
+
+export interface EventListItem {
+  slug: string
+  name: string
+  waiting_count: number
+  checked_in_count: number
+  total_count: number
+  created_at: string
 }
 
 export interface EventPublic {
@@ -32,6 +43,8 @@ export interface EventPublic {
   called_count: number
   checked_in_count: number
   total_count: number
+  created_at?: string | null
+  event_qr_url?: string | null
 }
 
 export interface RegisterResponse {
@@ -131,6 +144,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listEvents: () => request<EventListItem[]>('/api/events'),
+
   createEvent: (name: string, pin: string) =>
     request<EventCreated>('/api/events', {
       method: 'POST',

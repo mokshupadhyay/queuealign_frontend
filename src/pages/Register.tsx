@@ -68,8 +68,8 @@ export function Register() {
         <>
           <h1 className="page-title">{event?.name ?? 'Loading…'}</h1>
           <p className="page-sub muted">
-            Register for check-in. You’ll get a queue number and QR ticket — keep that page open or
-            bookmark it.
+            Join this event to get your queue number and a personal ticket QR. Show that QR at the
+            desk so organizers can verify you.
           </p>
           {event && (
             <p className="muted" style={{ marginBottom: '1rem' }}>
@@ -108,7 +108,7 @@ export function Register() {
               {notice && <p className="success">{notice}</p>}
               {error && <p className="error">{error}</p>}
               <button className="btn" type="submit" disabled={loading || !event}>
-                {loading ? 'Joining…' : 'Get my queue number'}
+                {loading ? 'Joining…' : 'Join & get my queue number'}
               </button>
             </form>
           )}
