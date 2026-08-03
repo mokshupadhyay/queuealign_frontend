@@ -14,6 +14,10 @@ export function CreateEvent() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!/^\d{4,32}$/.test(pin)) {
+      setError('PIN must be 4–32 digits')
+      return
+    }
     setLoading(true)
     try {
       const res = await api.createEvent(name.trim(), pin)
@@ -27,15 +31,21 @@ export function CreateEvent() {
 
   async function copyPath(path: string, label: string) {
     const url = `${window.location.origin}${path}`
-    await navigator.clipboard.writeText(url)
-    setCopied(label)
-    setTimeout(() => setCopied(null), 1500)
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(label)
+      window.setTimeout(() => setCopied(null), 1500)
+    } catch {
+      window.prompt('Copy this link:', url)
+    }
   }
 
   return (
     <Shell>
       <h1 className="page-title">Create an event</h1>
-      <p className="page-sub muted">Set a name and a desk PIN. You’ll get shareable links for register, desk, and display.</p>
+      <p className="page-sub muted">
+        Set a name and a desk PIN. You’ll get shareable links for register, desk, and display.
+      </p>
 
       {!created ? (
         <form className="form panel" onSubmit={onSubmit}>
@@ -44,20 +54,23 @@ export function CreateEvent() {
             <input
               required
               minLength={2}
+              maxLength={200}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Spring Hackathon Check-in"
             />
           </label>
           <label>
-            Organizer PIN
+            Organizer PIN (digits only)
             <input
               required
               minLength={4}
+              maxLength={32}
               type="password"
               inputMode="numeric"
+              pattern="\d*"
               value={pin}
-              onChange={(e) => setPin(e.target.value)}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               placeholder="4+ digits"
               autoComplete="new-password"
             />
@@ -71,8 +84,8 @@ export function CreateEvent() {
         <div className="panel">
           <h2 style={{ marginBottom: '0.35rem' }}>{created.name}</h2>
           <p className="muted">
-            Code: <strong style={{ color: 'var(--ink)' }}>{created.slug}</strong> · Desk PIN saved
-            offline — store it securely.
+            Code: <strong style={{ color: 'var(--ink)' }}>{created.slug}</strong> · Store your PIN
+            securely — it unlocks the desk.
           </p>
           <div className="link-list">
             {(

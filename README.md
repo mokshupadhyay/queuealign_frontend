@@ -40,3 +40,8 @@ Open http://localhost:5173 — Vite proxies `/api` to port 8001.
 ## Env (backend)
 
 See `.env.example` — `DATABASE_URL`, `CORS_ORIGINS`, `SECRET_KEY`, `FRONTEND_URL`.
+
+## Env (frontend)
+
+See `.env.example` — optional `VITE_API_BASE` when the API is on another origin.
+SPA hosts (e.g. Vercel) should use the included `vercel.json` rewrite.

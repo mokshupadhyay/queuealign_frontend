@@ -13,6 +13,7 @@ export function Register() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -32,6 +33,7 @@ export function Register() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setNotice(null)
     setLoading(true)
     try {
       const res = await api.register(slug, {
@@ -39,6 +41,9 @@ export function Register() {
         email: email.trim(),
         team_name: team.trim() || undefined,
       })
+      if (res.already_registered) {
+        setNotice('You’re already registered — opening your ticket.')
+      }
       navigate(res.status_path)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
@@ -46,6 +51,8 @@ export function Register() {
       setLoading(false)
     }
   }
+
+  const closed = event && !event.is_active
 
   return (
     <Shell>
@@ -70,30 +77,41 @@ export function Register() {
               total
             </p>
           )}
-          <form className="form panel" onSubmit={onSubmit}>
-            <label>
-              Full name
-              <input required value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label>
-              Email
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </label>
-            <label>
-              Team (optional)
-              <input value={team} onChange={(e) => setTeam(e.target.value)} />
-            </label>
-            {error && <p className="error">{error}</p>}
-            <button className="btn" type="submit" disabled={loading || !event}>
-              {loading ? 'Joining…' : 'Get my queue number'}
-            </button>
-          </form>
+          {closed ? (
+            <div className="panel">
+              <p className="error">Registration is closed for this event.</p>
+              <p className="muted" style={{ marginTop: '0.5rem' }}>
+                If you already registered, open your ticket link from earlier.
+              </p>
+            </div>
+          ) : (
+            <form className="form panel" onSubmit={onSubmit}>
+              <label>
+                Full name
+                <input required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <label>
+                Email
+                <input
+                  required
+                  type="email"
+                  maxLength={255}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
+              </label>
+              <label>
+                Team (optional)
+                <input maxLength={120} value={team} onChange={(e) => setTeam(e.target.value)} />
+              </label>
+              {notice && <p className="success">{notice}</p>}
+              {error && <p className="error">{error}</p>}
+              <button className="btn" type="submit" disabled={loading || !event}>
+                {loading ? 'Joining…' : 'Get my queue number'}
+              </button>
+            </form>
+          )}
         </>
       )}
     </Shell>

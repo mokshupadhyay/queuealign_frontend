@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
-import { api, deskTokenKey, type QueueOut } from '../api/client'
+import { Link, useParams } from 'react-router-dom'
+import { ApiError, api, deskTokenKey, type QueueOut } from '../api/client'
 import { Shell } from '../components/Shell'
+import { usePolling } from '../hooks/usePolling'
 
 const POLL_MS = 2000
 
@@ -29,9 +30,19 @@ export function Desk() {
   const [flash, setFlash] = useState<string | null>(null)
   const [manualNumber, setManualNumber] = useState('')
   const [scanning, setScanning] = useState(false)
-  const scannerRef = useRef<{ stop: () => Promise<void> } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [scanHint, setScanHint] = useState<string | null>(null)
+  const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null)
   const lastScanRef = useRef<string>('')
   const checkinRef = useRef<(t: string) => Promise<void>>(async () => undefined)
+  const genRef = useRef(0)
+
+  useEffect(() => {
+    setToken(localStorage.getItem(deskTokenKey(slug)) ?? '')
+    setQueue(null)
+    setError(null)
+    setScanning(false)
+  }, [slug])
 
   const showFlash = (msg: string) => {
     setFlash(msg)
@@ -45,51 +56,45 @@ export function Desk() {
       setQueue(data)
       setError(null)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load queue'
-      if (msg.toLowerCase().includes('auth') || msg.toLowerCase().includes('token')) {
+      if (err instanceof ApiError && err.status === 401) {
         localStorage.removeItem(deskTokenKey(slug))
         setToken('')
+        setError('Session expired — unlock the desk again.')
+        return
       }
-      setError(msg)
+      setError(err instanceof Error ? err.message : 'Failed to load queue')
     }
   }, [slug, token])
 
-  useEffect(() => {
-    if (!token) return
-    loadQueue()
-    const id = window.setInterval(loadQueue, POLL_MS)
-    return () => window.clearInterval(id)
-  }, [token, loadQueue])
+  usePolling(loadQueue, POLL_MS, Boolean(token))
 
   async function unlock(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setBusy(true)
     try {
       const res = await api.authDesk(slug, pin)
       localStorage.setItem(deskTokenKey(slug), res.token)
       setToken(res.token)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Auth failed')
+    } finally {
+      setBusy(false)
     }
   }
 
-  async function callNext() {
+  async function runAction(fn: () => Promise<{ message: string }>) {
+    if (busy) return
+    setBusy(true)
+    setError(null)
     try {
-      const res = await api.callNext(slug, token)
+      const res = await fn()
       showFlash(res.message)
       await loadQueue()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Call next failed')
-    }
-  }
-
-  async function skip() {
-    try {
-      const res = await api.skip(slug, token)
-      showFlash(res.message)
-      await loadQueue()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Skip failed')
+      setError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -99,6 +104,7 @@ export function Desk() {
     try {
       const res = await api.checkin(slug, token, { token: checkinToken })
       showFlash(res.message)
+      setScanHint(null)
       await loadQueue()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Check-in failed')
@@ -115,52 +121,86 @@ export function Desk() {
     e.preventDefault()
     const n = Number(manualNumber)
     if (!Number.isFinite(n) || n < 1) return
-    try {
-      const res = await api.checkin(slug, token, { queue_number: n })
-      showFlash(res.message)
-      setManualNumber('')
-      await loadQueue()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Check-in failed')
-    }
+    await runAction(() => api.checkin(slug, token, { queue_number: n }))
+    setManualNumber('')
   }
 
   useEffect(() => {
     if (!scanning) {
       const s = scannerRef.current
       if (s) {
-        s.stop().catch(() => undefined)
+        s.stop()
+          .catch(() => undefined)
+          .finally(() => {
+            try {
+              s.clear()
+            } catch {
+              /* ignore */
+            }
+          })
         scannerRef.current = null
       }
       return
     }
+
+    const gen = ++genRef.current
     let cancelled = false
+
     ;(async () => {
       const { Html5Qrcode } = await import('html5-qrcode')
-      if (cancelled) return
+      if (cancelled || gen !== genRef.current) return
+
       const scanner = new Html5Qrcode('desk-scanner')
       scannerRef.current = scanner
+
+      const cameras = await Html5Qrcode.getCameras().catch(() => [])
+      const back =
+        cameras.find((c) => /back|rear|environment/i.test(c.label)) ?? cameras[0]
+      const config = { fps: 8, qrbox: { width: 220, height: 220 } }
+
+      const onScan = (decoded: string) => {
+        const t = extractToken(decoded)
+        if (t) void checkinRef.current(t)
+        else setScanHint('QR read, but it wasn’t a QueueAlign ticket.')
+      }
+
       try {
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 8, qrbox: { width: 220, height: 220 } },
-          (decoded) => {
-            const t = extractToken(decoded)
-            if (t) void checkinRef.current(t)
-          },
-          () => undefined,
-        )
+        if (back?.id) {
+          await scanner.start(back.id, config, onScan, () => undefined)
+        } else {
+          try {
+            await scanner.start({ facingMode: 'environment' }, config, onScan, () => undefined)
+          } catch {
+            await scanner.start({ facingMode: 'user' }, config, onScan, () => undefined)
+          }
+        }
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Camera unavailable')
+        if (!cancelled && gen === genRef.current) {
+          setError(
+            err instanceof Error
+              ? `${err.message} — use HTTPS or localhost for camera, or check in by queue #.`
+              : 'Camera unavailable',
+          )
           setScanning(false)
         }
       }
     })()
+
     return () => {
       cancelled = true
-      scannerRef.current?.stop().catch(() => undefined)
+      const s = scannerRef.current
       scannerRef.current = null
+      if (s) {
+        s.stop()
+          .catch(() => undefined)
+          .finally(() => {
+            try {
+              s.clear()
+            } catch {
+              /* ignore */
+            }
+          })
+      }
     }
   }, [scanning])
 
@@ -177,19 +217,22 @@ export function Desk() {
               inputMode="numeric"
               required
               minLength={4}
+              maxLength={32}
               value={pin}
-              onChange={(e) => setPin(e.target.value)}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               autoComplete="current-password"
             />
           </label>
           {error && <p className="error">{error}</p>}
-          <button className="btn" type="submit">
-            Unlock desk
+          <button className="btn" type="submit" disabled={busy}>
+            {busy ? 'Unlocking…' : 'Unlock desk'}
           </button>
         </form>
       </Shell>
     )
   }
+
+  const serving = queue?.now_serving
 
   return (
     <Shell>
@@ -198,31 +241,36 @@ export function Desk() {
           <h1 className="page-title">{queue?.event_name ?? 'Desk'}</h1>
           <p className="page-sub muted">Live queue · updates every few seconds</p>
         </div>
-        <button
-          className="btn btn-ghost"
-          type="button"
-          onClick={() => {
-            localStorage.removeItem(deskTokenKey(slug))
-            setToken('')
-          }}
-        >
-          Lock
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <Link className="btn btn-ghost" to={`/e/${slug}/display`} target="_blank">
+            Open display
+          </Link>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={() => {
+              localStorage.removeItem(deskTokenKey(slug))
+              setToken('')
+            }}
+          >
+            Lock
+          </button>
+        </div>
       </div>
 
-      {flash && <p className="success">{flash}</p>}
-      {error && <p className="error">{error}</p>}
+      {flash && <p className="success" aria-live="polite">{flash}</p>}
+      {error && <p className="error" aria-live="assertive">{error}</p>}
 
       <div className="desk-layout" style={{ marginTop: '1rem' }}>
         <aside className="panel">
           <div className="now-box">
             <div className="label">Now serving</div>
-            {queue?.now_serving ? (
+            {serving ? (
               <>
-                <div className="num" key={queue.now_serving.queue_number}>
-                  #{queue.now_serving.queue_number}
+                <div className="num" key={serving.queue_number}>
+                  #{serving.queue_number}
                 </div>
-                <div>{queue.now_serving.name}</div>
+                <div>{serving.name}</div>
               </>
             ) : (
               <div className="num" style={{ fontSize: '1.6rem', opacity: 0.7 }}>
@@ -232,11 +280,33 @@ export function Desk() {
           </div>
 
           <div className="actions">
-            <button className="btn" type="button" onClick={callNext}>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy || Boolean(serving)}
+              onClick={() => runAction(() => api.callNext(slug, token))}
+            >
               Call next
             </button>
-            <button className="btn btn-danger" type="button" onClick={skip} disabled={!queue?.now_serving}>
-              Skip
+            <button
+              className="btn"
+              type="button"
+              disabled={busy || !serving}
+              onClick={() =>
+                runAction(() =>
+                  api.checkin(slug, token, { queue_number: serving!.queue_number }),
+                )
+              }
+            >
+              Check in current
+            </button>
+            <button
+              className="btn btn-danger"
+              type="button"
+              disabled={busy || !serving}
+              onClick={() => runAction(() => api.skip(slug, token, true))}
+            >
+              Skip → next
             </button>
           </div>
 
@@ -250,13 +320,30 @@ export function Desk() {
               <span>Checked in</span>
             </div>
             <div className="stat">
-              <strong>{queue?.called_count ?? 0}</strong>
-              <span>Called</span>
+              <strong>{queue?.skipped_count ?? 0}</strong>
+              <span>Skipped</span>
             </div>
             <div className="stat">
               <strong>{queue?.total_count ?? 0}</strong>
               <span>Total</span>
             </div>
+          </div>
+
+          <div style={{ marginTop: '1rem', display: 'grid', gap: '0.5rem' }}>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                runAction(() =>
+                  api.updateEvent(slug, token, !(queue?.is_active ?? true)).then((e) => ({
+                    message: e.is_active ? 'Registration opened' : 'Registration closed',
+                  })),
+                )
+              }
+            >
+              {queue?.is_active === false ? 'Open registration' : 'Close registration'}
+            </button>
           </div>
 
           <form onSubmit={manualCheckin} style={{ marginTop: '1.25rem', display: 'grid', gap: '0.5rem' }}>
@@ -269,7 +356,7 @@ export function Desk() {
                 placeholder="e.g. 12"
               />
             </label>
-            <button className="btn btn-ghost" type="submit">
+            <button className="btn btn-ghost" type="submit" disabled={busy}>
               Check in
             </button>
           </form>
@@ -278,6 +365,7 @@ export function Desk() {
             <button className="btn btn-ghost" type="button" onClick={() => setScanning((s) => !s)}>
               {scanning ? 'Stop camera' : 'Scan QR'}
             </button>
+            {scanHint && <p className="muted" style={{ marginTop: '0.5rem' }}>{scanHint}</p>}
             {scanning && <div id="desk-scanner" className="scanner" style={{ marginTop: '0.75rem' }} />}
           </div>
         </aside>
@@ -290,6 +378,7 @@ export function Desk() {
                 <th>Name</th>
                 <th>Team</th>
                 <th>Status</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -301,11 +390,39 @@ export function Desk() {
                   <td>
                     <span className={`status-pill ${p.status}`}>{p.status.replace('_', ' ')}</span>
                   </td>
+                  <td>
+                    {p.status !== 'checked_in' && (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        disabled={busy}
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
+                        onClick={() =>
+                          runAction(() =>
+                            api.checkin(slug, token, { queue_number: p.queue_number }),
+                          )
+                        }
+                      >
+                        Check in
+                      </button>
+                    )}
+                    {(p.status === 'skipped' || p.status === 'called') && (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        disabled={busy}
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem', marginLeft: '0.25rem' }}
+                        onClick={() => runAction(() => api.requeue(slug, token, p.queue_number))}
+                      >
+                        Requeue
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {!queue?.participants.length && (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={5} className="muted">
                     No registrations yet.
                   </td>
                 </tr>

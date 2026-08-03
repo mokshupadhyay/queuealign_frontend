@@ -1,12 +1,14 @@
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
+
 export type ParticipantStatus = 'waiting' | 'called' | 'checked_in' | 'skipped'
 
 export interface Participant {
   id: number
   name: string
-  email: string
+  email?: string
   team_name: string | null
   queue_number: number
-  checkin_token: string
+  checkin_token?: string
   status: ParticipantStatus
   created_at: string
   called_at: string | null
@@ -36,6 +38,7 @@ export interface RegisterResponse {
   participant: Participant
   status_path: string
   qr_url: string
+  already_registered: boolean
 }
 
 export interface ParticipantStatusOut {
@@ -69,6 +72,7 @@ export interface DisplayOut {
 export interface QueueOut {
   event_name: string
   event_slug: string
+  is_active: boolean
   now_serving: Participant | null
   participants: Participant[]
   waiting_count: number
@@ -84,8 +88,26 @@ export interface MessageOut {
   participant: Participant | null
 }
 
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+    this.name = 'ApiError'
+  }
+}
+
+function apiUrl(path: string) {
+  return `${API_BASE}${path}`
+}
+
+export function resolveAssetUrl(path: string) {
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  return apiUrl(path)
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -103,7 +125,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === 'string' ? detail : 'Request failed')
+    throw new ApiError(res.status, typeof detail === 'string' ? detail : 'Request failed')
   }
   return res.json() as Promise<T>
 }
@@ -117,6 +139,13 @@ export const api = {
 
   getEvent: (slug: string) => request<EventPublic>(`/api/events/${slug}`),
 
+  updateEvent: (slug: string, deskToken: string, is_active: boolean) =>
+    request<EventPublic>(`/api/events/${slug}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${deskToken}` },
+      body: JSON.stringify({ is_active }),
+    }),
+
   authDesk: (slug: string, pin: string) =>
     request<{ token: string; expires_in_hours: number }>(`/api/events/${slug}/auth`, {
       method: 'POST',
@@ -129,14 +158,16 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  participantStatus: (slug: string, token: string) =>
-    request<ParticipantStatusOut>(`/api/events/${slug}/participants/${token}`),
+  participantStatus: (slug: string, token: string, init?: RequestInit) =>
+    request<ParticipantStatusOut>(`/api/events/${slug}/participants/${token}`, init),
 
-  display: (slug: string) => request<DisplayOut>(`/api/events/${slug}/display`),
+  display: (slug: string, init?: RequestInit) =>
+    request<DisplayOut>(`/api/events/${slug}/display`, init),
 
-  queue: (slug: string, deskToken: string) =>
+  queue: (slug: string, deskToken: string, init?: RequestInit) =>
     request<QueueOut>(`/api/events/${slug}/queue`, {
-      headers: { Authorization: `Bearer ${deskToken}` },
+      ...init,
+      headers: { Authorization: `Bearer ${deskToken}`, ...(init?.headers ?? {}) },
     }),
 
   callNext: (slug: string, deskToken: string) =>
@@ -152,10 +183,18 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  skip: (slug: string, deskToken: string) =>
+  skip: (slug: string, deskToken: string, callNext = false) =>
     request<MessageOut>(`/api/events/${slug}/skip`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${deskToken}` },
+      body: JSON.stringify({ call_next: callNext }),
+    }),
+
+  requeue: (slug: string, deskToken: string, queue_number: number) =>
+    request<MessageOut>(`/api/events/${slug}/requeue`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${deskToken}` },
+      body: JSON.stringify({ queue_number }),
     }),
 }
 
